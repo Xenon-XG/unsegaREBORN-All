@@ -3,8 +3,11 @@
 
 #if defined(_WIN32) || defined(_WIN64)
     #define PLATFORM_WINDOWS 1
-#elif defined(__linux__) && defined(__x86_64__)
+#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
     #define PLATFORM_LINUX 1
+    #if defined(__aarch64__)
+        #define PLATFORM_AARCH64 1
+    #endif
 #else
     #error "unsupported platform"
 #endif
@@ -240,6 +243,29 @@ static inline PEB* lib_get_peb(void) {
 
 #else
 
+#ifdef PLATFORM_AARCH64
+
+#define SYS_read            63
+#define SYS_write           64
+#define SYS_openat          56
+#define SYS_close           57
+#define SYS_lseek           62
+#define SYS_mmap            222
+#define SYS_munmap          215
+#define SYS_getdents64      61
+#define SYS_exit_group      94
+#define SYS_mkdirat         34
+#define SYS_newfstatat      79
+#define SYS_unlinkat        35
+#define SYS_renameat        38
+#define SYS_utimensat       88
+#define SYS_clock_gettime   113
+
+/* aarch64 has no SYS_open, use openat with AT_FDCWD */
+#define SYS_open_via_openat 1
+
+#else /* x86_64 */
+
 #define SYS_read            0
 #define SYS_write           1
 #define SYS_open            2
@@ -254,6 +280,9 @@ static inline PEB* lib_get_peb(void) {
 #define SYS_unlinkat        263
 #define SYS_renameat        264
 #define SYS_utimensat       280
+#define SYS_clock_gettime   228
+
+#endif /* PLATFORM_AARCH64 */
 
 #define O_RDONLY    0x0000
 #define O_WRONLY    0x0001
@@ -292,6 +321,31 @@ struct linux_dirent64 {
     char d_name[];
 };
 
+#ifdef PLATFORM_AARCH64
+/* aarch64 struct stat layout differs from x86_64 */
+struct linux_stat {
+    uint64_t st_dev;
+    uint64_t st_ino;
+    uint32_t st_mode;
+    uint32_t st_nlink;
+    uint32_t st_uid;
+    uint32_t st_gid;
+    uint64_t st_rdev;
+    uint64_t __pad1;
+    int64_t st_size;
+    int32_t st_blksize;
+    int32_t __pad2;
+    int64_t st_blocks;
+    int64_t st_atime_sec;
+    int64_t st_atime_nsec;
+    int64_t st_mtime_sec;
+    int64_t st_mtime_nsec;
+    int64_t st_ctime_sec;
+    int64_t st_ctime_nsec;
+    uint32_t __unused4;
+    uint32_t __unused5;
+};
+#else
 struct linux_stat {
     uint64_t st_dev;
     uint64_t st_ino;
@@ -312,11 +366,71 @@ struct linux_stat {
     int64_t st_ctime_nsec;
     int64_t __unused[3];
 };
+#endif
 
 struct linux_timespec {
     int64_t tv_sec;
     int64_t tv_nsec;
 };
+
+#ifdef PLATFORM_AARCH64
+
+/* aarch64 Linux syscall convention:
+ * syscall number in x8, args in x0-x5, return in x0
+ * uses svc #0 instruction */
+
+static inline long syscall1(long n, long a1) {
+    register long x8 __asm__("x8") = n;
+    register long x0 __asm__("x0") = a1;
+    __asm__ volatile ("svc #0" : "+r"(x0) : "r"(x8) : "memory", "cc");
+    return x0;
+}
+
+static inline long syscall2(long n, long a1, long a2) {
+    register long x8 __asm__("x8") = n;
+    register long x0 __asm__("x0") = a1;
+    register long x1 __asm__("x1") = a2;
+    __asm__ volatile ("svc #0" : "+r"(x0) : "r"(x8), "r"(x1) : "memory", "cc");
+    return x0;
+}
+
+static inline long syscall3(long n, long a1, long a2, long a3) {
+    register long x8 __asm__("x8") = n;
+    register long x0 __asm__("x0") = a1;
+    register long x1 __asm__("x1") = a2;
+    register long x2 __asm__("x2") = a3;
+    __asm__ volatile ("svc #0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2) : "memory", "cc");
+    return x0;
+}
+
+static inline long syscall4(long n, long a1, long a2, long a3, long a4) {
+    register long x8 __asm__("x8") = n;
+    register long x0 __asm__("x0") = a1;
+    register long x1 __asm__("x1") = a2;
+    register long x2 __asm__("x2") = a3;
+    register long x3 __asm__("x3") = a4;
+    __asm__ volatile ("svc #0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2), "r"(x3) : "memory", "cc");
+    return x0;
+}
+
+static inline long syscall6(long n, long a1, long a2, long a3, long a4, long a5, long a6) {
+    register long x8 __asm__("x8") = n;
+    register long x0 __asm__("x0") = a1;
+    register long x1 __asm__("x1") = a2;
+    register long x2 __asm__("x2") = a3;
+    register long x3 __asm__("x3") = a4;
+    register long x4 __asm__("x4") = a5;
+    register long x5 __asm__("x5") = a6;
+    __asm__ volatile ("svc #0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5) : "memory", "cc");
+    return x0;
+}
+
+/* Wrapper: aarch64 has no open(), use openat(AT_FDCWD, ...) */
+static inline long sys_open(const char* path, int flags, int mode) {
+    return syscall4(SYS_openat, AT_FDCWD, (long)path, flags, mode);
+}
+
+#else /* x86_64 */
 
 static inline long syscall1(long n, long a1) {
     long ret;
@@ -351,6 +465,13 @@ static inline long syscall6(long n, long a1, long a2, long a3, long a4, long a5,
     __asm__ volatile ("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8), "r"(r9) : "rcx", "r11", "memory");
     return ret;
 }
+
+/* x86_64 has SYS_open */
+static inline long sys_open(const char* path, int flags, int mode) {
+    return syscall3(SYS_open, (long)path, flags, mode);
+}
+
+#endif /* PLATFORM_AARCH64 */
 
 #endif
 

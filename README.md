@@ -66,13 +66,13 @@ format:
 
 ## platforms
 
-|   platform  |         method          |
-|-------------|-------------------------|
-| win x64     | native (ntdll only)     |
-| win arm64   | x64 emulation           |
-| linux x64   | native (static no libc) |
-| linux arm64 | box64/qemu              |
-| macos       | wine (untested)         |
+|   platform   |         method            |
+|--------------|---------------------------|
+| win x64      | native (ntdll only)       |
+| win arm64    | x64 emulation             |
+| linux x64    | native (static no libc)   |
+| linux arm64  | native (static no libc)   |
+| macos        | wine (untested)           |
 
 ## release
 

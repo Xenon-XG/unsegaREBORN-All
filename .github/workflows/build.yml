@@ -28,7 +28,7 @@ jobs:
           name: win-x64
           path: build/unsegareborn-win-x64.exe
 
-  linux:
+  linux-x64:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,13 +43,51 @@ jobs:
       - run: sed 's/\r$//' build.cmd | sh
         env:
           DATECODE: ${{ github.ref_name }}
+      - name: smoke test
+        run: ./build/unsegareborn-linux-x64 -h || true
+      - name: functional test
+        if: hashFiles('tests/*.opt') != ''
+        run: ./build/unsegareborn-linux-x64 -v tests/*.opt || true
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x64
           path: build/unsegareborn-linux-x64
 
+  linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld qemu-user-static \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      - name: inject keys
+        env:
+          KEYS: ${{ secrets.KEYS_INC }}
+        run: printf '%s\n' "$KEYS" > include/keys.inc
+      - name: build arm64
+        env:
+          DATECODE: ${{ github.ref_name }}
+        run: |
+          mkdir -p build
+          SRC="src/lib.c src/main.c src/crypto.c src/keys.c src/exfat.c src/ntfs.c src/stream.c src/aes.c src/aes_soft.c"
+          CFLAGS="-target aarch64-linux-gnu -Oz -I include -fno-asynchronous-unwind-tables -fno-ident -ffunction-sections -fdata-sections -flto -ffreestanding -fno-builtin -fno-stack-protector -nostdlib -fno-unwind-tables -fno-exceptions -fmerge-all-constants -fno-addrsig"
+          LDFLAGS="-fuse-ld=lld -Wl,--gc-sections -Wl,--icf=all -Wl,-e,_start -Wl,-s -Wl,--lto-O2 -static"
+          clang $CFLAGS $LDFLAGS -DVERSION="\"$DATECODE\"" -o build/unsegareborn-linux-arm64 $SRC
+          echo "done: $(stat -c%s build/unsegareborn-linux-arm64) bytes"
+      - name: smoke test
+        run: qemu-aarch64-static ./build/unsegareborn-linux-arm64 -h || true
+      - name: functional test
+        if: hashFiles('tests/*.opt') != ''
+        run: qemu-aarch64-static ./build/unsegareborn-linux-arm64 -v tests/*.opt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: build/unsegareborn-linux-arm64
+
   release:
-    needs: [windows, linux]
+    needs: [windows, linux-x64, linux-arm64]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -62,9 +100,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: linux-x64
-          path: linux
+          path: linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64
+          path: linux-arm64
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             win/unsegareborn-win-x64.exe
-            linux/unsegareborn-linux-x64
+            linux-x64/unsegareborn-linux-x64
+            linux-arm64/unsegareborn-linux-arm64

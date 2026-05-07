@@ -73,6 +73,7 @@ bool key_derive(const char* id, uint8_t out_key[16], uint8_t out_iv[16]) {
 }
 
 void iv_page(uint64_t off, const uint8_t* base, uint8_t* out) {
+#if defined(__x86_64__)
     __asm__ volatile (
         "movq %[off], %%xmm0\n\t"
         "punpcklqdq %%xmm0, %%xmm0\n\t"
@@ -83,6 +84,15 @@ void iv_page(uint64_t off, const uint8_t* base, uint8_t* out) {
         : [off] "r" (off), [base] "r" (base), [out] "r" (out)
         : "xmm0", "xmm1", "memory"
     );
+#else
+    /* XOR offset into both 64-bit halves of base IV */
+    uint8_t off_bytes[8];
+    for (int i = 0; i < 8; i++) off_bytes[i] = (uint8_t)(off >> (i * 8));
+    for (int i = 0; i < 8; i++) {
+        out[i]     = base[i]     ^ off_bytes[i];
+        out[i + 8] = base[i + 8] ^ off_bytes[i];
+    }
+#endif
 }
 
 void iv_file(const uint8_t key[16], const uint8_t* hdr, const uint8_t* page, uint8_t out[16]) {

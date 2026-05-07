@@ -19,28 +19,44 @@ if [ -z "$DATECODE" ]; then
     echo "$DATESTR $REV" > build/.buildrev
 fi
 
-SRC="src/lib.c src/main.c src/crypto.c src/keys.c src/exfat.c src/ntfs.c src/stream.c src/aes.c"
+SRC="src/lib.c src/main.c src/crypto.c src/keys.c src/exfat.c src/ntfs.c src/stream.c"
 
 # Check for clang
 command -v clang >/dev/null 2>&1 || { echo "error: clang not found"; exit 1; }
+
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64|amd64) ARCH_NAME="x64" ;;
+    aarch64|arm64) ARCH_NAME="arm64" ;;
+    *) echo "error: unsupported architecture: $ARCH"; exit 1 ;;
+esac
 
 # Detect OS
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
         OUT="build/unsegareborn-win-x64.exe"
+        SRC="$SRC src/aes.c"
         CFLAGS="-target x86_64-pc-windows-gnu -Oz -maes -msse4.1 -I include -fno-asynchronous-unwind-tables -fno-ident -ffunction-sections -fdata-sections -flto -ffreestanding -fno-builtin -fno-stack-protector -nostdlib -fno-unwind-tables -fno-exceptions -fmerge-all-constants -fno-addrsig"
         LDFLAGS="-fuse-ld=lld -Wl,--gc-sections -Wl,--icf=all -Wl,-e,_start -Wl,--subsystem,console -Wl,-s -Wl,--lto-Oz -L/mingw64/lib"
         LIBS="-lntdll"
         ;;
     *)
-        OUT="build/unsegareborn-linux-x64"
-        CFLAGS="-Oz -maes -msse4.1 -I include -fno-asynchronous-unwind-tables -fno-ident -ffunction-sections -fdata-sections -flto -ffreestanding -fno-builtin -fno-stack-protector -nostdlib -fno-unwind-tables -fno-exceptions -fmerge-all-constants -fno-addrsig"
+        OUT="build/unsegareborn-linux-${ARCH_NAME}"
+        BASE_CFLAGS="-Oz -I include -fno-asynchronous-unwind-tables -fno-ident -ffunction-sections -fdata-sections -flto -ffreestanding -fno-builtin -fno-stack-protector -nostdlib -fno-unwind-tables -fno-exceptions -fmerge-all-constants -fno-addrsig"
+        if [ "$ARCH_NAME" = "x64" ]; then
+            SRC="$SRC src/aes.c"
+            CFLAGS="$BASE_CFLAGS -maes -msse4.1"
+        else
+            SRC="$SRC src/aes.c src/aes_soft.c"
+            CFLAGS="$BASE_CFLAGS"
+        fi
         LDFLAGS="-fuse-ld=lld -Wl,--gc-sections -Wl,--icf=all -Wl,-e,_start -Wl,-s -Wl,--lto-O2 -static"
         LIBS=""
         ;;
 esac
 
-echo "building..."
+echo "building ${ARCH_NAME}..."
 clang $CFLAGS $LDFLAGS -DVERSION="\"$DATECODE\"" -o $OUT $SRC $LIBS
 echo "done: $OUT ($(stat -c%s "$OUT" 2>/dev/null || stat -f%z "$OUT") bytes)"
 exit 0

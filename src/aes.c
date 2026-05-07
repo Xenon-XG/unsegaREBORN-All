@@ -211,6 +211,7 @@ static void aes_hw_cbc_encrypt(AES_ctx* ctx, uint8_t* buf, size_t len) {
 }
 #endif
 
+#if AES_HW_AVAILABLE
 void AES_init_ctx_iv(AES_ctx* ctx, const uint8_t* key, const uint8_t* iv) {
     aes_hw_key_expand(ctx, key);
     for (int i = 0; i < 16; ++i) ctx->iv[i] = iv[i];
@@ -227,3 +228,4 @@ void AES_CBC_decrypt_buffer(AES_ctx* ctx, uint8_t* buf, size_t len) {
 void AES_CBC_encrypt_buffer(AES_ctx* ctx, uint8_t* buf, size_t len) {
     aes_hw_cbc_encrypt(ctx, buf, len);
 }
+#endif

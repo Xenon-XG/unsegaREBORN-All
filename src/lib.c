@@ -218,6 +218,7 @@ void lib_free(void* ptr) {
 #endif
 
 size_t lib_strlen(const char* s) {
+#if defined(__x86_64__)
     size_t len;
     __asm__ volatile (
         "xor %%al, %%al\n\t"
@@ -230,6 +231,11 @@ size_t lib_strlen(const char* s) {
         : "al", "memory"
     );
     return len;
+#else
+    const char* p = s;
+    while (*p) p++;
+    return (size_t)(p - s);
+#endif
 }
 
 char* lib_strcpy(char* dst, const char* src) {
@@ -285,6 +291,7 @@ char* lib_strncat(char* dst, const char* src, size_t n) {
 }
 
 void* lib_memcpy(void* dst, const void* src, size_t n) {
+#if defined(__x86_64__)
     void* ret = dst;
     __asm__ volatile (
         "rep movsb"
@@ -293,6 +300,12 @@ void* lib_memcpy(void* dst, const void* src, size_t n) {
         : "memory"
     );
     return ret;
+#else
+    uint8_t* d = (uint8_t*)dst;
+    const uint8_t* s = (const uint8_t*)src;
+    while (n--) *d++ = *s++;
+    return dst;
+#endif
 }
 
 #undef memcpy
@@ -300,6 +313,7 @@ void* memcpy(void* dst, const void* src, size_t n) __attribute__((alias("lib_mem
 #define memcpy lib_memcpy
 
 void* lib_memset(void* dst, int c, size_t n) {
+#if defined(__x86_64__)
     void* ret = dst;
     __asm__ volatile (
         "rep stosb"
@@ -308,6 +322,11 @@ void* lib_memset(void* dst, int c, size_t n) {
         : "memory"
     );
     return ret;
+#else
+    uint8_t* d = (uint8_t*)dst;
+    while (n--) *d++ = (uint8_t)c;
+    return dst;
+#endif
 }
 
 #undef memset
@@ -658,7 +677,7 @@ FILE* lib_fopen(const char* path, const char* mode) {
         return NULL;
     }
 
-    long fd = syscall3(SYS_open, (long)path, flags, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    long fd = sys_open(path, flags, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if (fd < 0) { lib_errno_val = (int)(-fd); return NULL; }
 
     FILE* f = lib_malloc(sizeof(FILE));
@@ -765,7 +784,7 @@ int lib_fclose(FILE* f) {
 
 time_t lib_time(time_t* t) {
     struct linux_timespec ts;
-    syscall2(228, 0, (long)&ts);
+    syscall2(SYS_clock_gettime, 0, (long)&ts);
     if (t) *t = ts.tv_sec;
     return ts.tv_sec;
 }
@@ -1110,7 +1129,7 @@ intptr_t lib_findfirst(const char* pattern, lib_finddata_t* data) {
         lib_strcpy(state->dir_path, ".");
     }
 
-    long fd = syscall3(SYS_open, (long)state->dir_path, O_RDONLY | O_DIRECTORY, 0);
+    long fd = sys_open(state->dir_path, O_RDONLY | O_DIRECTORY, 0);
     if (fd < 0) { lib_free(state); lib_errno_val = (int)(-fd); return -1; }
     state->fd = (int)fd;
 
@@ -1296,6 +1315,20 @@ void lib_init(void) {
     lib_stdin_impl.flags = LIB_FILE_READ;
 }
 
+#ifdef PLATFORM_AARCH64
+__attribute__((naked, noreturn)) void _start(void) {
+    __asm__ volatile (
+        "mov x29, #0\n\t"
+        "mov x30, #0\n\t"
+        "ldr x0, [sp]\n\t"
+        "add x1, sp, #8\n\t"
+        "bl _start_main\n\t"
+        "mov x8, #94\n\t"
+        "svc #0\n\t"
+        ::: "memory"
+    );
+}
+#else
 __attribute__((naked, noreturn)) void _start(void) {
     __asm__ volatile (
         "xor %%rbp, %%rbp\n\t"
@@ -1308,6 +1341,7 @@ __attribute__((naked, noreturn)) void _start(void) {
         ::: "memory"
     );
 }
+#endif
 
 __attribute__((used)) int _start_main(int argc, char** argv) {
     lib_init();
